@@ -17,6 +17,8 @@ import { TranslateService } from "@ngx-translate/core";
 import { ErrorHandler } from "@harbor/ui";
 import { MessageHandlerService } from "../../../shared/message-handler/message-handler.service";
 import { InlineAlertComponent } from "../../../shared/inline-alert/inline-alert.component";
+import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
+import { AppConfigService } from "../../../app-config.service";
 
 @Component({
   selector: "add-robot",
@@ -28,6 +30,8 @@ export class AddRobotComponent implements OnInit, OnDestroy {
   copyToken: boolean;
   robotToken: string;
   robotAccount: string;
+  downLoadFileName: string = '';
+  downLoadHref: SafeUrl = '';
   isSubmitOnGoing = false;
   closable: boolean = false;
   staticBackdrop: boolean = true;
@@ -38,21 +42,27 @@ export class AddRobotComponent implements OnInit, OnDestroy {
   robotNameChecker: Subject<string> = new Subject<string>();
   nameTooltipText = "ROBOT_ACCOUNT.ROBOT_NAME";
   robotForm: NgForm;
-  imagePermission: string = "push-and-pull";
+  imagePermissionPush: boolean = true;
+  imagePermissionPull: boolean = true;
+  withHelmChart: boolean;
   @Input() projectId: number;
   @Input() projectName: string;
   @Output() create = new EventEmitter<boolean>();
-  @ViewChild("robotForm") currentForm: NgForm;
-  @ViewChild("copyAlert") copyAlert: InlineAlertComponent;
+  @ViewChild("robotForm", {static: true}) currentForm: NgForm;
+  @ViewChild("copyAlert", {static: false}) copyAlert: InlineAlertComponent;
   constructor(
       private robotService: RobotService,
       private translate: TranslateService,
       private errorHandler: ErrorHandler,
       private cdr: ChangeDetectorRef,
-      private messageHandlerService: MessageHandlerService
-  ) {}
+      private messageHandlerService: MessageHandlerService,
+      private sanitizer: DomSanitizer,
+      private appConfigService: AppConfigService
 
+  ) {}
   ngOnInit(): void {
+    this.withHelmChart = this.appConfigService.getConfig().with_chartmuseum;
+
     this.robotNameChecker.pipe(debounceTime(800)).subscribe((name: string) => {
       let cont = this.currentForm.controls["robot_name"];
       if (cont) {
@@ -99,6 +109,8 @@ export class AddRobotComponent implements OnInit, OnDestroy {
     this.robot.name = "";
     this.robot.description = "";
     this.addRobotOpened = true;
+    this.imagePermissionPush = true;
+    this.imagePermissionPull = true;
     this.isRobotNameValid = true;
     this.robot = new Robot();
     this.nameTooltipText = "ROBOT_ACCOUNT.ROBOT_NAME";
@@ -118,12 +130,12 @@ export class AddRobotComponent implements OnInit, OnDestroy {
       return;
     }
     // set value to robot.access.isPullImage and robot.access.isPushOrPullImage when submit
-    if ( this.imagePermission === 'pull' ) {
-      this.robot.access.isPullImage = true;
-      this.robot.access.isPushOrPullImage = false;
-    } else {
+    if ( this.imagePermissionPush && this.imagePermissionPull) {
       this.robot.access.isPullImage = false;
       this.robot.access.isPushOrPullImage = true;
+    } else {
+      this.robot.access.isPullImage = true;
+      this.robot.access.isPushOrPullImage = false;
     }
     this.isSubmitOnGoing = true;
     this.robotService
@@ -145,6 +157,10 @@ export class AddRobotComponent implements OnInit, OnDestroy {
                     this.createSuccess = res;
                   });
               this.addRobotOpened = false;
+              // export to token file
+              const downLoadUrl = `data:text/json;charset=utf-8, ${encodeURIComponent(JSON.stringify(response))}`;
+              this.downLoadHref = this.sanitizer.bypassSecurityTrustUrl(downLoadUrl);
+              this.downLoadFileName = `${response.name}.json`;
             },
             error => {
               this.isSubmitOnGoing = false;
@@ -193,5 +209,9 @@ export class AddRobotComponent implements OnInit, OnDestroy {
         .subscribe((res: string) => {
           this.messageHandlerService.showSuccess(res);
         });
+  }
+
+  closeModal() {
+    this.copyToken = false;
   }
 }

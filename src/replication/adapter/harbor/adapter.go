@@ -27,22 +27,34 @@ import (
 	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/common/utils/registry/auth"
 	adp "github.com/goharbor/harbor/src/replication/adapter"
+	"github.com/goharbor/harbor/src/replication/adapter/native"
 	"github.com/goharbor/harbor/src/replication/model"
 	"github.com/goharbor/harbor/src/replication/util"
 )
 
 func init() {
-	if err := adp.RegisterFactory(model.RegistryTypeHarbor, func(registry *model.Registry) (adp.Adapter, error) {
-		return newAdapter(registry)
-	}); err != nil {
+	if err := adp.RegisterFactory(model.RegistryTypeHarbor, new(factory)); err != nil {
 		log.Errorf("failed to register factory for %s: %v", model.RegistryTypeHarbor, err)
 		return
 	}
 	log.Infof("the factory for adapter %s registered", model.RegistryTypeHarbor)
 }
 
+type factory struct {
+}
+
+// Create ...
+func (f *factory) Create(r *model.Registry) (adp.Adapter, error) {
+	return newAdapter(r)
+}
+
+// AdapterPattern ...
+func (f *factory) AdapterPattern() *model.AdapterPattern {
+	return nil
+}
+
 type adapter struct {
-	*adp.DefaultImageRegistry
+	*native.Adapter
 	registry *model.Registry
 	url      string
 	client   *common_http.Client
@@ -67,7 +79,7 @@ func newAdapter(registry *model.Registry) (*adapter, error) {
 		modifiers = append(modifiers, authorizer)
 	}
 
-	reg, err := adp.NewDefaultImageRegistry(registry)
+	dockerRegistryAdapter, err := native.NewAdapter(registry)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +90,7 @@ func newAdapter(registry *model.Registry) (*adapter, error) {
 			&http.Client{
 				Transport: transport,
 			}, modifiers...),
-		DefaultImageRegistry: reg,
+		Adapter: dockerRegistryAdapter,
 	}, nil
 }
 
@@ -155,7 +167,7 @@ func (a *adapter) PrepareForPush(resources []*model.Resource) error {
 		paths := strings.Split(resource.Metadata.Repository.Name, "/")
 		projectName := paths[0]
 		// handle the public properties
-		metadata := resource.Metadata.Repository.Metadata
+		metadata := abstractPublicMetadata(resource.Metadata.Repository.Metadata)
 		pro, exist := projects[projectName]
 		if exist {
 			metadata = mergeMetadata(pro.Metadata, metadata)
@@ -184,6 +196,19 @@ func (a *adapter) PrepareForPush(resources []*model.Resource) error {
 		log.Debugf("project %s created", project.Name)
 	}
 	return nil
+}
+
+func abstractPublicMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+	public, exist := metadata["public"]
+	if !exist {
+		return nil
+	}
+	return map[string]interface{}{
+		"public": public,
+	}
 }
 
 // currently, mergeMetadata only handles the public metadata

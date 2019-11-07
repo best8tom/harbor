@@ -16,17 +16,13 @@ package googlegcr
 
 import (
 	"github.com/goharbor/harbor/src/common/utils/log"
-	"github.com/goharbor/harbor/src/common/utils/registry/auth"
 	adp "github.com/goharbor/harbor/src/replication/adapter"
+	"github.com/goharbor/harbor/src/replication/adapter/native"
 	"github.com/goharbor/harbor/src/replication/model"
-	"github.com/goharbor/harbor/src/replication/util"
-	"net/http"
 )
 
 func init() {
-	if err := adp.RegisterFactory(model.RegistryTypeGoogleGcr, func(registry *model.Registry) (adp.Adapter, error) {
-		return newAdapter(registry)
-	}); err != nil {
+	if err := adp.RegisterFactory(model.RegistryTypeGoogleGcr, new(factory)); err != nil {
 		log.Errorf("failed to register factory for %s: %v", model.RegistryTypeGoogleGcr, err)
 		return
 	}
@@ -34,29 +30,32 @@ func init() {
 }
 
 func newAdapter(registry *model.Registry) (*adapter, error) {
-	var credential auth.Credential
-	if registry.Credential != nil && len(registry.Credential.AccessSecret) != 0 {
-		credential = auth.NewBasicAuthCredential(
-			registry.Credential.AccessKey,
-			registry.Credential.AccessSecret)
-	}
-	authorizer := auth.NewStandardTokenAuthorizer(&http.Client{
-		Transport: util.GetHTTPTransport(registry.Insecure),
-	}, credential)
-
-	reg, err := adp.NewDefaultImageRegistryWithCustomizedAuthorizer(registry, authorizer)
+	dockerRegistryAdapter, err := native.NewAdapter(registry)
 	if err != nil {
 		return nil, err
 	}
 
 	return &adapter{
-		registry:             registry,
-		DefaultImageRegistry: reg,
+		registry: registry,
+		Adapter:  dockerRegistryAdapter,
 	}, nil
 }
 
+type factory struct {
+}
+
+// Create ...
+func (f *factory) Create(r *model.Registry) (adp.Adapter, error) {
+	return newAdapter(r)
+}
+
+// AdapterPattern ...
+func (f *factory) AdapterPattern() *model.AdapterPattern {
+	return getAdapterInfo()
+}
+
 type adapter struct {
-	*adp.DefaultImageRegistry
+	*native.Adapter
 	registry *model.Registry
 }
 
@@ -85,6 +84,39 @@ func (adapter) Info() (info *model.RegistryInfo, err error) {
 	}, nil
 }
 
+func getAdapterInfo() *model.AdapterPattern {
+	info := &model.AdapterPattern{
+		EndpointPattern: &model.EndpointPattern{
+			EndpointType: model.EndpointPatternTypeList,
+			Endpoints: []*model.Endpoint{
+				{
+					Key:   "gcr.io",
+					Value: "https://gcr.io",
+				},
+				{
+					Key:   "us.gcr.io",
+					Value: "https://us.gcr.io",
+				},
+				{
+					Key:   "eu.gcr.io",
+					Value: "https://eu.gcr.io",
+				},
+				{
+					Key:   "asia.gcr.io",
+					Value: "https://asia.gcr.io",
+				},
+			},
+		},
+		CredentialPattern: &model.CredentialPattern{
+			AccessKeyType:    model.AccessKeyTypeFix,
+			AccessKeyData:    "_json_key",
+			AccessSecretType: model.AccessSecretTypeFile,
+			AccessSecretData: "No Change",
+		},
+	}
+	return info
+}
+
 // HealthCheck checks health status of a registry
 func (a adapter) HealthCheck() (model.HealthStatus, error) {
 	var err error
@@ -98,9 +130,4 @@ func (a adapter) HealthCheck() (model.HealthStatus, error) {
 		return model.Unhealthy, nil
 	}
 	return model.Healthy, nil
-}
-
-// PrepareForPush nothing need to do.
-func (a adapter) PrepareForPush(resources []*model.Resource) error {
-	return nil
 }

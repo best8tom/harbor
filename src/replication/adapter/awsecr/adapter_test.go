@@ -1,18 +1,21 @@
 package awsecr
 
 import (
+	"errors"
 	"fmt"
-	"github.com/goharbor/harbor/src/common/utils/test"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/goharbor/harbor/src/common/utils/test"
 	adp "github.com/goharbor/harbor/src/replication/adapter"
+	"github.com/goharbor/harbor/src/replication/adapter/native"
 	"github.com/goharbor/harbor/src/replication/model"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestAdapter_NewAdapter(t *testing.T) {
@@ -24,7 +27,7 @@ func TestAdapter_NewAdapter(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, factory)
 
-	adapter, err := factory(&model.Registry{
+	adapter, err := newAdapter(&model.Registry{
 		Type: model.RegistryTypeAwsEcr,
 		Credential: &model.Credential{
 			AccessKey:    "xxx",
@@ -35,7 +38,7 @@ func TestAdapter_NewAdapter(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, adapter)
 
-	adapter, err = factory(&model.Registry{
+	adapter, err = newAdapter(&model.Registry{
 		Type: model.RegistryTypeAwsEcr,
 		Credential: &model.Credential{
 			AccessKey:    "xxx",
@@ -46,7 +49,7 @@ func TestAdapter_NewAdapter(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, adapter)
 
-	adapter, err = factory(&model.Registry{
+	adapter, err = newAdapter(&model.Registry{
 		Type: model.RegistryTypeAwsEcr,
 		Credential: &model.Credential{
 			AccessKey:    "xxx",
@@ -130,15 +133,15 @@ func getMockAdapter(t *testing.T, hasCred, health bool) (*adapter, *httptest.Ser
 			AccessSecret: "ppp",
 		}
 	}
-	reg, err := adp.NewDefaultImageRegistry(registry)
+	dockerRegistryAdapter, err := native.NewAdapter(registry)
 	if err != nil {
 		panic(err)
 	}
 	return &adapter{
-		registry:             registry,
-		DefaultImageRegistry: reg,
-		region:               "test-region",
-		forceEndpoint:        &server.URL,
+		registry:      registry,
+		Adapter:       dockerRegistryAdapter,
+		region:        "test-region",
+		forceEndpoint: &server.URL,
 	}, server
 }
 
@@ -249,4 +252,34 @@ func TestAwsAuthCredential_Modify(t *testing.T) {
 	time.Sleep(time.Second)
 	err = a.Modify(req)
 	assert.Nil(t, err)
+}
+
+var urlForBenchmark = []string{
+	"https://1234.dkr.ecr.test-region.amazonaws.com/v2/",
+	"https://api.ecr.test-region.amazonaws.com",
+	"https://test-region.amazonaws.com",
+}
+
+func compileRegexpEveryTime(url string) (string, error) {
+	rs := regexp.MustCompile(regionPattern).FindStringSubmatch(url)
+	if rs == nil {
+		return "", errors.New("Bad aws url")
+	}
+	return rs[1], nil
+}
+
+func BenchmarkGetRegion(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for _, url := range urlForBenchmark {
+			parseRegion(url)
+		}
+	}
+}
+
+func BenchmarkCompileRegexpEveryTime(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for _, url := range urlForBenchmark {
+			compileRegexpEveryTime(url)
+		}
+	}
 }

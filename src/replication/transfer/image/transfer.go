@@ -113,7 +113,7 @@ func createRegistry(reg *model.Registry) (adapter.ImageRegistry, error) {
 	if err != nil {
 		return nil, err
 	}
-	ad, err := factory(reg)
+	ad, err := factory.Create(reg)
 	if err != nil {
 		return nil, err
 	}
@@ -261,6 +261,7 @@ func (t *transfer) pullManifest(repository, reference string) (
 	t.logger.Infof("pulling the manifest of image %s:%s ...", repository, reference)
 	manifest, digest, err := t.src.PullManifest(repository, reference, []string{
 		schema1.MediaTypeManifest,
+		schema1.MediaTypeSignedManifest,
 		schema2.MediaTypeManifest,
 		manifestlist.MediaTypeManifestList,
 	})

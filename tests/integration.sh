@@ -17,6 +17,8 @@ set -x
 gsutil version -l
 set +x
 
+docker-compose version
+
 ## -------------------------------------------- Pre-condition --------------------------------------------
 if [[ $DRONE_REPO != "goharbor/harbor" ]]; then
     echo "Only run tests again Harbor Repo."
@@ -72,12 +74,8 @@ echo $container_ip
 ## --------------------------------------------- Init Version -----------------------------------------------
 buildinfo=$(drone build info goharbor/harbor $DRONE_BUILD_NUMBER)
 echo $buildinfo
-git_commit=$(git rev-parse --short=8 HEAD)
-
 #  the target release version is the version of next release(RC or GA). It needs to be updated on creating new release branch.
 target_release_version=$(cat ./VERSION)
-#  the harbor ui version will be shown in the about dialog.
-Harbor_UI_Version=$target_release_version-$git_commit
 #  the harbor package version is for both online and offline installer.
 #  harbor-offline-installer-v1.5.2-build.8.tgz
 Harbor_Package_Version=$target_release_version-'build.'$DRONE_BUILD_NUMBER
@@ -89,13 +87,12 @@ if [[ $DRONE_BRANCH == "master" ]]; then
 else
   Harbor_Assets_Version=$target_release_version
 fi
-export Harbor_UI_Version=$Harbor_UI_Version
 export Harbor_Assets_Version=$Harbor_Assets_Version
 #  the env is for online and offline package.
 export Harbor_Package_Version=$Harbor_Package_Version
+export NPM_REGISTRY=$NPM_REGISTRY
 
 echo "--------------------------------------------------"
-echo "Harbor UI version: $Harbor_UI_Version"
 echo "Harbor Package version: $Harbor_Package_Version"
 echo "Harbor Assets version: $Harbor_Assets_Version"
 echo "--------------------------------------------------"
@@ -148,6 +145,8 @@ if [[ $DRONE_BRANCH == "master" || $DRONE_BRANCH == *"refs/tags"* || $DRONE_BRAN
     if [[ $DRONE_BUILD_EVENT == "push" ]]; then
         package_offline_installer
         upload_latest_build=true
+        echo -en "$HARBOR_SIGN_KEY" | gpg --import
+        gpg -v -ab -u $HARBOR_SIGN_KEY_ID $harbor_build_bundle
     fi
 fi
 
@@ -165,9 +164,12 @@ fi
 #
 set -e
 if [ $upload_build == true ]; then
-    cp $harbor_build_bundle harbor-offline-installer-latest.tgz
-    uploader $harbor_build_bundle $harbor_target_bucket
-    uploader harbor-offline-installer-latest.tgz $harbor_target_bucket
+    cp ${harbor_build_bundle}     harbor-offline-installer-latest.tgz
+    cp ${harbor_build_bundle}.asc harbor-offline-installer-latest.tgz.asc
+    uploader ${harbor_build_bundle}     $harbor_target_bucket
+    uploader ${harbor_build_bundle}.asc $harbor_target_bucket
+    uploader harbor-offline-installer-latest.tgz     $harbor_target_bucket
+    uploader harbor-offline-installer-latest.tgz.asc $harbor_target_bucket
     upload_bundle_success=true
 fi
 
@@ -193,14 +195,14 @@ if [ $upload_latest_build == true ] && [ $upload_bundle_success == true ]; then
 fi
 
 ## --------------------------------------------- Upload securego results ------------------------------------------
-if [ $DRONE_BUILD_EVENT == "push" ]; then
-    go get github.com/securego/gosec/cmd/gosec
-    go get github.com/dghubble/sling
-    make gosec -e GOSECRESULTS=harbor-gosec-results-latest.json
-    echo $git_commit > ./harbor-gosec-results-latest-version
-    uploader harbor-gosec-results-latest.json $harbor_target_bucket
-    uploader harbor-gosec-results-latest-version $harbor_target_bucket
-fi
+#if [ $DRONE_BUILD_EVENT == "push" ]; then
+#    go get github.com/securego/gosec/cmd/gosec
+#    go get github.com/dghubble/sling
+#    make gosec -e GOSECRESULTS=harbor-gosec-results-latest.json
+#    echo $git_commit > ./harbor-gosec-results-latest-version
+#    uploader harbor-gosec-results-latest.json $harbor_target_bucket
+#    uploader harbor-gosec-results-latest-version $harbor_target_bucket
+#fi
 
 ## ------------------------------------------------ Tear Down -----------------------------------------------------
 if [ -f "$keyfile" ]; then

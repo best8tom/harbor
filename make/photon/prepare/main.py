@@ -13,9 +13,11 @@ from utils.core import prepare_core
 from utils.notary import prepare_notary
 from utils.log import prepare_log_configs
 from utils.clair import prepare_clair
+from utils.clair_adapter import prepare_clair_adapter
 from utils.chart import prepare_chartmuseum
 from utils.docker_compose import prepare_docker_compose
 from utils.nginx import prepare_nginx, nginx_confd_dir
+from utils.redis import prepare_redis
 from g import (config_dir, input_config_path, private_key_pem_path, root_crt_path, secret_key_dir,
 old_private_key_pem_path, old_crt_path)
 
@@ -28,8 +30,11 @@ old_private_key_pem_path, old_crt_path)
 def main(conf, with_notary, with_clair, with_chartmuseum):
 
     delfile(config_dir)
-    config_dict = parse_yaml_config(conf)
-    validate(config_dict, notary_mode=with_notary)
+    config_dict = parse_yaml_config(conf, with_notary=with_notary, with_clair=with_clair, with_chartmuseum=with_chartmuseum)
+    try:
+        validate(config_dict, notary_mode=with_notary)
+    except Exception as e:
+        print("Config validation Error: ", e)
 
     prepare_log_configs(config_dict)
     prepare_nginx(config_dict)
@@ -38,6 +43,7 @@ def main(conf, with_notary, with_clair, with_chartmuseum):
     prepare_registry_ctl(config_dict)
     prepare_db(config_dict)
     prepare_job_service(config_dict)
+    prepare_redis(config_dict)
 
     get_secret_key(secret_key_dir)
 
@@ -52,6 +58,7 @@ def main(conf, with_notary, with_clair, with_chartmuseum):
 
     if with_clair:
         prepare_clair(config_dict)
+        prepare_clair_adapter(config_dict)
 
     if with_chartmuseum:
         prepare_chartmuseum(config_dict)

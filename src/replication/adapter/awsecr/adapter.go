@@ -16,6 +16,9 @@ package awsecr
 
 import (
 	"errors"
+	"net/http"
+	"regexp"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -24,15 +27,20 @@ import (
 	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/common/utils/registry"
 	adp "github.com/goharbor/harbor/src/replication/adapter"
+	"github.com/goharbor/harbor/src/replication/adapter/native"
 	"github.com/goharbor/harbor/src/replication/model"
-	"net/http"
-	"regexp"
+)
+
+const (
+	regionPattern = "https://(?:api|\\d+\\.dkr)\\.ecr\\.([\\w\\-]+)\\.amazonaws\\.com"
+)
+
+var (
+	regionRegexp = regexp.MustCompile(regionPattern)
 )
 
 func init() {
-	if err := adp.RegisterFactory(model.RegistryTypeAwsEcr, func(registry *model.Registry) (adp.Adapter, error) {
-		return newAdapter(registry)
-	}); err != nil {
+	if err := adp.RegisterFactory(model.RegistryTypeAwsEcr, new(factory)); err != nil {
 		log.Errorf("failed to register factory for %s: %v", model.RegistryTypeAwsEcr, err)
 		return
 	}
@@ -45,28 +53,40 @@ func newAdapter(registry *model.Registry) (*adapter, error) {
 		return nil, err
 	}
 	authorizer := NewAuth(region, registry.Credential.AccessKey, registry.Credential.AccessSecret, registry.Insecure)
-	reg, err := adp.NewDefaultImageRegistryWithCustomizedAuthorizer(registry, authorizer)
+	dockerRegistry, err := native.NewAdapterWithCustomizedAuthorizer(registry, authorizer)
 	if err != nil {
 		return nil, err
 	}
 	return &adapter{
-		registry:             registry,
-		DefaultImageRegistry: reg,
-		region:               region,
+		registry: registry,
+		Adapter:  dockerRegistry,
+		region:   region,
 	}, nil
 }
 
 func parseRegion(url string) (string, error) {
-	pattern := "https://(?:api|\\d+\\.dkr)\\.ecr\\.([\\w\\-]+)\\.amazonaws\\.com"
-	rs := regexp.MustCompile(pattern).FindStringSubmatch(url)
+	rs := regionRegexp.FindStringSubmatch(url)
 	if rs == nil {
 		return "", errors.New("Bad aws url")
 	}
 	return rs[1], nil
 }
 
+type factory struct {
+}
+
+// Create ...
+func (f *factory) Create(r *model.Registry) (adp.Adapter, error) {
+	return newAdapter(r)
+}
+
+// AdapterPattern ...
+func (f *factory) AdapterPattern() *model.AdapterPattern {
+	return getAdapterInfo()
+}
+
 type adapter struct {
-	*adp.DefaultImageRegistry
+	*native.Adapter
 	registry      *model.Registry
 	region        string
 	forceEndpoint *string
@@ -93,6 +113,85 @@ func (*adapter) Info() (info *model.RegistryInfo, err error) {
 			model.TriggerTypeScheduled,
 		},
 	}, nil
+}
+
+func getAdapterInfo() *model.AdapterPattern {
+	info := &model.AdapterPattern{
+		EndpointPattern: &model.EndpointPattern{
+			EndpointType: model.EndpointPatternTypeList,
+			Endpoints: []*model.Endpoint{
+				{
+					Key:   "ap-northeast-1",
+					Value: "https://api.ecr.ap-northeast-1.amazonaws.com",
+				},
+				{
+					Key:   "us-east-1",
+					Value: "https://api.ecr.us-east-1.amazonaws.com",
+				},
+				{
+					Key:   "us-east-2",
+					Value: "https://api.ecr.us-east-2.amazonaws.com",
+				},
+				{
+					Key:   "us-west-1",
+					Value: "https://api.ecr.us-west-1.amazonaws.com",
+				},
+				{
+					Key:   "us-west-2",
+					Value: "https://api.ecr.us-west-2.amazonaws.com",
+				},
+				{
+					Key:   "ap-east-1",
+					Value: "https://api.ecr.ap-east-1.amazonaws.com",
+				},
+				{
+					Key:   "ap-south-1",
+					Value: "https://api.ecr.ap-south-1.amazonaws.com",
+				},
+				{
+					Key:   "ap-northeast-2",
+					Value: "https://api.ecr.ap-northeast-2.amazonaws.com",
+				},
+				{
+					Key:   "ap-southeast-1",
+					Value: "https://api.ecr.ap-southeast-1.amazonaws.com",
+				},
+				{
+					Key:   "ap-southeast-2",
+					Value: "https://api.ecr.ap-southeast-2.amazonaws.com",
+				},
+				{
+					Key:   "ca-central-1",
+					Value: "https://api.ecr.ca-central-1.amazonaws.com",
+				},
+				{
+					Key:   "eu-central-1",
+					Value: "https://api.ecr.eu-central-1.amazonaws.com",
+				},
+				{
+					Key:   "eu-west-1",
+					Value: "https://api.ecr.eu-west-1.amazonaws.com",
+				},
+				{
+					Key:   "eu-west-2",
+					Value: "https://api.ecr.eu-west-2.amazonaws.com",
+				},
+				{
+					Key:   "eu-west-3",
+					Value: "https://api.ecr.eu-west-3.amazonaws.com",
+				},
+				{
+					Key:   "eu-north-1",
+					Value: "https://api.ecr.eu-north-1.amazonaws.com",
+				},
+				{
+					Key:   "sa-east-1",
+					Value: "https://api.ecr.sa-east-1.amazonaws.com",
+				},
+			},
+		},
+	}
+	return info
 }
 
 // HealthCheck checks health status of a registry
